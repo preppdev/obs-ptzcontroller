@@ -31,6 +31,7 @@
 #include <QCheckBox>
 #include <QProgressBar>
 #include <QCoreApplication>
+#include <QTimer>
 #include <QNetworkInterface>
 #include <QHostAddress>
 #include <functional>
@@ -814,6 +815,14 @@ void PtzControlsDock::openCcuWindow()
 		return;
 	const int devId = d->id();
 	auto dev = [devId]() { return PtzManager::instance().device(devId); }; // re-resolve each use
+	/* After a CCU change, re-read the camera shortly after so the displayed
+	 * values reflect the new state (NDI reports cached values instantly). */
+	auto refreshSoon = [dev]() {
+		QTimer::singleShot(150, [dev]() {
+			if (auto *x = dev())
+				x->requestImageState();
+		});
+	};
 
 	QDialog dlg(this);
 	dlg.setWindowTitle(obs_module_text("ImageSettings"));
@@ -845,6 +854,7 @@ void PtzControlsDock::openCcuWindow()
 		if (auto *x = dev())
 			x->setWhiteBalance(m);
 		syncWb(m);
+		refreshSoon();
 	});
 	connect(red, &QSlider::valueChanged, &dlg, [=](int v) {
 		redVal->setText(QString::number(v));
@@ -882,12 +892,17 @@ void PtzControlsDock::openCcuWindow()
 	connect(ex, QOverload<int>::of(&QComboBox::activated), &dlg, [=](int m) {
 		if (auto *x = dev())
 			x->setExposureMode(m);
+		refreshSoon();
 	});
 	ef->addRow(obs_module_text("Mode"), ex);
-	QLabel *shLbl = addStepperRow(ef, obs_module_text("Shutter"), [dev](int s) { if (auto *x = dev()) x->stepShutter(s); });
-	QLabel *irLbl = addStepperRow(ef, obs_module_text("Iris"), [dev](int s) { if (auto *x = dev()) x->stepIris(s); });
-	QLabel *gnLbl = addStepperRow(ef, obs_module_text("Gain"), [dev](int s) { if (auto *x = dev()) x->stepGain(s); });
-	addStepperRow(ef, obs_module_text("Brightness"), [dev](int s) { if (auto *x = dev()) x->stepBright(s); });
+	QLabel *shLbl = addStepperRow(ef, obs_module_text("Shutter"),
+				      [=](int s) { if (auto *x = dev()) x->stepShutter(s); refreshSoon(); });
+	QLabel *irLbl = addStepperRow(ef, obs_module_text("Iris"),
+				      [=](int s) { if (auto *x = dev()) x->stepIris(s); refreshSoon(); });
+	QLabel *gnLbl = addStepperRow(ef, obs_module_text("Gain"),
+				      [=](int s) { if (auto *x = dev()) x->stepGain(s); refreshSoon(); });
+	addStepperRow(ef, obs_module_text("Brightness"),
+		      [=](int s) { if (auto *x = dev()) x->stepBright(s); refreshSoon(); });
 	lay->addWidget(exBox);
 
 	/* Toggles. */
