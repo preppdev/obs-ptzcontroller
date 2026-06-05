@@ -40,19 +40,30 @@ public:
 	void stepBright(int dir) override;
 	void setExposureComp(bool on) override;
 	void setBacklight(bool on) override;
+	void requestImageState() override;
 
 	int pan_speed_max = 0x18;
 	int tilt_speed_max = 0x14;
 	int zoom_speed_max = 7;
 	int focus_speed_max = 7;
 
+private slots:
+	void onUdpReadyRead();
+	void onTcpReadyRead();
+
 private:
 	void sendVisca(const QByteArray &payload, bool inquiry = false);
 	void resetSequence();
+	void sendInquiry(int type, const char *hex);
+	void handleReply(const QByteArray &visca);
 
 	ViscaTransport transport_;
 	QUdpSocket udp_;
 	QTcpSocket tcp_;
 	QHostAddress addr_;
 	uint32_t seq_ = 1;
+
+	QList<int> pendingInq_; // expected inquiry types, in order
+	QByteArray tcpBuf_;
+	ImageState acc_;
 };

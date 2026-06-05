@@ -36,6 +36,7 @@ public:
 	void stepShutter(int dir) override;
 	void stepIris(int dir) override;
 	void stepGain(int dir) override;
+	void requestImageState() override;
 
 private:
 	void applyManualWB();

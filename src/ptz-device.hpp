@@ -77,6 +77,17 @@ inline int visca_default_port(ViscaTransport t)
 	}
 }
 
+/* Current image/CCU values read back from the camera (-1 = unknown). */
+struct ImageState {
+	int wbMode = -1;
+	int exposureMode = -1;
+	int redGain = -1;
+	int blueGain = -1;
+	int shutter = -1;
+	int iris = -1;
+	int gain = -1;
+};
+
 struct PTZConfig {
 	int id = 0;
 	QString name;
@@ -142,6 +153,13 @@ public:
 	virtual void stepBright(int dir) { (void)dir; }
 	virtual void setExposureComp(bool on) { (void)on; }
 	virtual void setBacklight(bool on) { (void)on; }
+
+	/* Ask the device to report current image values; it emits imageState()
+	 * when known. VISCA queries the camera; NDI reports last-set values. */
+	virtual void requestImageState() {}
+
+signals:
+	void imageState(const ImageState &state);
 
 protected:
 	PTZConfig cfg_;

@@ -195,6 +195,17 @@ void NDIDevice::stepGain(int dir)
 	applyManualExposure();
 }
 
+void NDIDevice::requestImageState()
+{
+	/* NDI has no readback; report the last values we set. */
+	ImageState s;
+	s.wbMode = wbMode_;
+	s.exposureMode = expManual_ ? 1 : 0;
+	s.redGain = (int)(red_ * 255.0f);
+	s.blueGain = (int)(blue_ * 255.0f);
+	emit imageState(s);
+}
+
 QVector<ProbeResult> ndi_discover(int wait_ms)
 {
 	QVector<ProbeResult> out;

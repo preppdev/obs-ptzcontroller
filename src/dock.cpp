@@ -675,5 +675,27 @@ void PtzControlsDock::openCcuWindow()
 	auto *close = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
 	connect(close, &QDialogButtonBox::rejected, &dlg, &QDialog::accept);
 	lay->addWidget(close);
+
+	/* Live readback: populate controls from the camera's reported state. */
+	connect(d, &PTZDevice::imageState, &dlg, [=](const ImageState &st) {
+		if (st.wbMode >= 0 && st.wbMode < wb->count()) {
+			wb->setCurrentIndex(st.wbMode);
+			syncWb(st.wbMode);
+		}
+		if (st.exposureMode >= 0 && st.exposureMode < ex->count())
+			ex->setCurrentIndex(st.exposureMode);
+		if (st.redGain >= 0) {
+			red->blockSignals(true);
+			red->setValue(st.redGain);
+			red->blockSignals(false);
+		}
+		if (st.blueGain >= 0) {
+			blue->blockSignals(true);
+			blue->setValue(st.blueGain);
+			blue->blockSignals(false);
+		}
+	});
+	d->requestImageState();
+
 	dlg.exec();
 }

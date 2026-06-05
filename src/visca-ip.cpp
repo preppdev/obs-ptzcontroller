@@ -11,9 +11,11 @@ ViscaIP::ViscaIP(const PTZConfig &cfg, QObject *parent) : PTZDevice(cfg, parent)
 	addr_ = QHostAddress(cfg.host);
 
 	if (transport_ == ViscaTransport::RawTCP) {
+		connect(&tcp_, &QTcpSocket::readyRead, this, &ViscaIP::onTcpReadyRead);
 		tcp_.connectToHost(cfg.host, (quint16)cfg_.port);
 	} else {
 		udp_.bind(QHostAddress::AnyIPv4, 0);
+		connect(&udp_, &QUdpSocket::readyRead, this, &ViscaIP::onUdpReadyRead);
 		if (transport_ == ViscaTransport::SonyUDP)
 			resetSequence();
 	}
@@ -227,4 +229,96 @@ void ViscaIP::setExposureComp(bool on)
 void ViscaIP::setBacklight(bool on)
 {
 	sendVisca(QByteArray::fromHex(on ? "8101043302ff" : "8101043303ff"));
+}
+
+/* ---- Live value readback (VISCA inquiries) ---- */
+
+enum { INQ_WB = 0, INQ_AE, INQ_RGAIN, INQ_BGAIN, INQ_SHUTTER, INQ_IRIS, INQ_GAIN };
+
+void ViscaIP::sendInquiry(int type, const char *hex)
+{
+	pendingInq_.append(type);
+	sendVisca(QByteArray::fromHex(hex), true);
+}
+
+void ViscaIP::requestImageState()
+{
+	acc_ = ImageState();
+	pendingInq_.clear();
+	sendInquiry(INQ_WB, "81090435ff");
+	sendInquiry(INQ_AE, "81090439ff");
+	sendInquiry(INQ_RGAIN, "81090443ff");
+	sendInquiry(INQ_BGAIN, "81090444ff");
+	sendInquiry(INQ_SHUTTER, "8109044aff");
+	sendInquiry(INQ_IRIS, "8109044bff");
+	sendInquiry(INQ_GAIN, "8109044cff");
+}
+
+void ViscaIP::handleReply(const QByteArray &v)
+{
+	if (v.size() < 3 || (uint8_t)v[0] != 0x90)
+		return;
+	const uint8_t kind = (uint8_t)v[1] & 0xf0;
+	if (kind == 0x40)
+		return; /* ack — no payload, don't consume a pending inquiry */
+	if (pendingInq_.isEmpty())
+		return;
+	const int type = pendingInq_.takeFirst();
+
+	if (kind == 0x50) { /* completion with data */
+		auto nib = [&](int i) { return (v.size() > i) ? ((uint8_t)v[i] & 0x0f) : 0; };
+		const int modeByte = nib(2);
+		const int val = (nib(4) << 4) | nib(5); /* gains / positions */
+		switch (type) {
+		case INQ_WB:
+			acc_.wbMode = modeByte;
+			break;
+		case INQ_AE: {
+			const uint8_t m = (uint8_t)v[2] & 0x0f;
+			acc_.exposureMode = (m == 0x03) ? 1 : (m == 0x0a) ? 2 : (m == 0x0b) ? 3 : (m == 0x0d) ? 4 : 0;
+			break;
+		}
+		case INQ_RGAIN:
+			acc_.redGain = val;
+			break;
+		case INQ_BGAIN:
+			acc_.blueGain = val;
+			break;
+		case INQ_SHUTTER:
+			acc_.shutter = val;
+			break;
+		case INQ_IRIS:
+			acc_.iris = val;
+			break;
+		case INQ_GAIN:
+			acc_.gain = val;
+			break;
+		}
+	}
+	/* error (0x60) → just consume the pending type and move on */
+
+	if (pendingInq_.isEmpty())
+		emit imageState(acc_);
+}
+
+void ViscaIP::onUdpReadyRead()
+{
+	while (udp_.hasPendingDatagrams()) {
+		QByteArray d(udp_.pendingDatagramSize(), 0);
+		udp_.readDatagram(d.data(), d.size());
+		/* Sony replies are wrapped in the 8-byte header; raw are bare. */
+		const QByteArray v = (transport_ == ViscaTransport::SonyUDP && d.size() > 8) ? d.mid(8) : d;
+		handleReply(v);
+	}
+}
+
+void ViscaIP::onTcpReadyRead()
+{
+	tcpBuf_ += tcp_.readAll();
+	int term;
+	while ((term = tcpBuf_.indexOf((char)0xff)) >= 0) {
+		QByteArray msg = tcpBuf_.left(term + 1);
+		tcpBuf_.remove(0, term + 1);
+		handleReply(msg);
+	}
 }
