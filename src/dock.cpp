@@ -59,6 +59,16 @@ static QString localIPv4()
 	return "192.168.1.10";
 }
 
+static QComboBox *transportCombo(QWidget *parent, ViscaTransport sel)
+{
+	auto *c = new QComboBox(parent);
+	c->addItem("Sony VISCA-over-IP (UDP :52381)", (int)ViscaTransport::SonyUDP);
+	c->addItem("Raw VISCA (UDP :1259)", (int)ViscaTransport::RawUDP);
+	c->addItem("Raw VISCA (TCP :5678)", (int)ViscaTransport::RawTCP);
+	c->setCurrentIndex(c->findData((int)sel));
+	return c;
+}
+
 PtzControlsDock::PtzControlsDock(QWidget *parent) : QFrame(parent)
 {
 	auto *outer = new QVBoxLayout(this);
@@ -528,6 +538,7 @@ void PtzControlsDock::addCameraDialog()
 		it->setData(Qt::UserRole + 1, r.port);
 		it->setData(Qt::UserRole + 2, (int)r.protocol);
 		it->setData(Qt::UserRole + 3, (int)r.transport);
+		it->setData(Qt::UserRole + 4, r.url);
 		results->addItem(it);
 	};
 	connect(prober, &PtzProber::detected, &dlg, [addResult](ProbeResult r) { addResult(r); });
@@ -564,10 +575,43 @@ void PtzControlsDock::addCameraDialog()
 	portSpin->setValue(52381);
 	auto *ccuEdit = new QLineEdit(&dlg);
 	ccuEdit->setPlaceholderText(obs_module_text("CcuHostHint"));
+	auto *ccuTransAdd = transportCombo(&dlg, ViscaTransport::SonyUDP);
+	auto *ccuDetect = new QPushButton(obs_module_text("Detect"), &dlg);
 	mf->addRow(obs_module_text("Name"), nameEdit);
 	mf->addRow(obs_module_text("Protocol"), protoCombo);
 	mf->addRow(obs_module_text("Port"), portSpin);
-	mf->addRow(obs_module_text("CcuHost"), ccuEdit);
+	auto *ccuRow = new QHBoxLayout();
+	ccuRow->addWidget(ccuEdit, 1);
+	ccuRow->addWidget(ccuDetect);
+	mf->addRow(obs_module_text("CcuHost"), ccuRow);
+	mf->addRow(obs_module_text("CcuTransport"), ccuTransAdd);
+	auto *ccuProber = new PtzProber(&dlg);
+	connect(ccuProber, &PtzProber::detected, &dlg, [=](ProbeResult r) {
+		if (r.protocol == PTZProtocol::ViscaIP) {
+			int i = ccuTransAdd->findData((int)r.transport);
+			if (i >= 0)
+				ccuTransAdd->setCurrentIndex(i);
+			ccuDetect->setText(obs_module_text("Detected"));
+		}
+	});
+	connect(ccuProber, &PtzProber::finished, &dlg, [=]() { ccuDetect->setEnabled(true); });
+	connect(ccuDetect, &QPushButton::clicked, &dlg, [=]() {
+		const QString h = ccuEdit->text().trimmed();
+		if (h.isEmpty())
+			return;
+		ccuDetect->setEnabled(false);
+		ccuDetect->setText(obs_module_text("Probing"));
+		ccuProber->probeHost(h);
+	});
+	/* Selecting a detected NDI camera pre-fills the CCU host with its IP
+	 * (parsed from the NDI stream) so hybrid control is one click away. */
+	connect(results, &QListWidget::currentItemChanged, &dlg, [=](QListWidgetItem *cur, QListWidgetItem *) {
+		if (cur && (PTZProtocol)cur->data(Qt::UserRole + 2).toInt() == PTZProtocol::NDI) {
+			const QString url = cur->data(Qt::UserRole + 4).toString();
+			if (!url.isEmpty() && ccuEdit->text().isEmpty())
+				ccuEdit->setText(url);
+		}
+	});
 	lay->addWidget(manualBox);
 
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
@@ -597,8 +641,8 @@ void PtzControlsDock::addCameraDialog()
 	const QString ccu = ccuEdit->text().trimmed();
 	if (!ccu.isEmpty()) {
 		cfg.ccu_host = ccu;
-		cfg.ccu_transport = ViscaTransport::SonyUDP; /* OBSBOT etc. use Sony VISCA-over-IP :52381 */
-		cfg.ccu_port = 52381;
+		cfg.ccu_transport = (ViscaTransport)ccuTransAdd->currentData().toInt();
+		cfg.ccu_port = visca_default_port(cfg.ccu_transport);
 	}
 
 	if (cfg.host.isEmpty())
@@ -608,16 +652,6 @@ void PtzControlsDock::addCameraDialog()
 }
 
 /* ---- Edit camera ---- */
-
-static QComboBox *transportCombo(QWidget *parent, ViscaTransport sel)
-{
-	auto *c = new QComboBox(parent);
-	c->addItem("Sony VISCA-over-IP (UDP :52381)", (int)ViscaTransport::SonyUDP);
-	c->addItem("Raw VISCA (UDP :1259)", (int)ViscaTransport::RawUDP);
-	c->addItem("Raw VISCA (TCP :5678)", (int)ViscaTransport::RawTCP);
-	c->setCurrentIndex(c->findData((int)sel));
-	return c;
-}
 
 void PtzControlsDock::editCameraDialog(int id)
 {
@@ -652,8 +686,31 @@ void PtzControlsDock::editCameraDialog(int id)
 	form->addRow(obs_module_text("Host"), hostEdit);
 	form->addRow(obs_module_text("Port"), portSpin);
 	form->addRow(obs_module_text("Transport"), trans);
-	form->addRow(obs_module_text("CcuHost"), ccuEdit);
+	/* CCU host + a Detect button that probes it and sets the CCU transport. */
+	auto *ccuRow = new QHBoxLayout();
+	auto *detectBtn = new QPushButton(obs_module_text("Detect"), &dlg);
+	ccuRow->addWidget(ccuEdit, 1);
+	ccuRow->addWidget(detectBtn);
+	form->addRow(obs_module_text("CcuHost"), ccuRow);
 	form->addRow(obs_module_text("CcuTransport"), ccuTrans);
+	auto *prober = new PtzProber(&dlg);
+	connect(prober, &PtzProber::detected, &dlg, [=](ProbeResult r) {
+		if (r.protocol == PTZProtocol::ViscaIP) {
+			int idx = ccuTrans->findData((int)r.transport);
+			if (idx >= 0)
+				ccuTrans->setCurrentIndex(idx);
+			detectBtn->setText(obs_module_text("Detected"));
+		}
+	});
+	connect(prober, &PtzProber::finished, &dlg, [=]() { detectBtn->setEnabled(true); });
+	connect(detectBtn, &QPushButton::clicked, &dlg, [=]() {
+		const QString h = ccuEdit->text().trimmed();
+		if (h.isEmpty())
+			return;
+		detectBtn->setEnabled(false);
+		detectBtn->setText(obs_module_text("Probing"));
+		prober->probeHost(h);
+	});
 	form->addRow(QString(), panInv);
 	form->addRow(QString(), tiltInv);
 

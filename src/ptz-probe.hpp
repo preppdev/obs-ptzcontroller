@@ -26,6 +26,7 @@ struct ProbeResult {
 	PTZProtocol protocol = PTZProtocol::ViscaIP;
 	ViscaTransport transport = ViscaTransport::SonyUDP;
 	QString model; // e.g. "VISCA camera (vendor 0020 / model 0513)"
+	QString url;   // for NDI: the camera's IP, parsed from the NDI source URL
 };
 
 class PtzProber : public QObject {

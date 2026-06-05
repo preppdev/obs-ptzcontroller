@@ -233,7 +233,14 @@ QVector<ProbeResult> ndi_discover(int wait_ms)
 		ProbeResult r;
 		r.protocol = PTZProtocol::NDI;
 		r.host = QString::fromUtf8(src[i].p_ndi_name);
-		r.model = "NDI source";
+		/* The NDI source URL carries the camera's address (e.g.
+		 * "10.2.172.223:5961" or "name@10.2.172.223"); extract the IP so it
+		 * can pre-fill the VISCA CCU host for hybrid control. */
+		QString u = QString::fromUtf8(src[i].p_url_address ? src[i].p_url_address : "");
+		if (u.contains('@'))
+			u = u.section('@', 1);
+		r.url = u.section(':', 0, 0);
+		r.model = r.url.isEmpty() ? "NDI source" : QString("NDI source @ %1").arg(r.url);
 		out.push_back(r);
 	}
 	ndi->find_destroy(find);
