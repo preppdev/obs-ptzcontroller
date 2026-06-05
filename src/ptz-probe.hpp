@@ -43,6 +43,9 @@ public:
 	 * after the listen window. */
 	void scanSubnet(const QString &sampleHost);
 
+	/* Abort any in-progress probe/scan and emit finished() immediately. */
+	void stop();
+
 signals:
 	void detected(ProbeResult result);
 	void finished();

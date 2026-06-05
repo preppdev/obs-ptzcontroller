@@ -180,3 +180,14 @@ void PtzProber::onTimeout()
 	tcpProbes_.clear();
 	emit finished();
 }
+
+void PtzProber::stop()
+{
+	batch_.stop();
+	scanIdx_ = scanCount_; /* halt the sweep */
+	timer_.stop();
+	for (auto *t : tcpProbes_)
+		t->deleteLater();
+	tcpProbes_.clear();
+	emit finished();
+}

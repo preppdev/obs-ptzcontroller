@@ -514,10 +514,13 @@ void PtzControlsDock::addCameraDialog()
 	auto *probeBtn = new QPushButton(obs_module_text("ProbeHost"), &dlg);
 	auto *scanBtn = new QPushButton(obs_module_text("ScanSubnet"), &dlg);
 	auto *ndiBtn = new QPushButton(obs_module_text("ScanNDI"), &dlg);
+	auto *stopBtn = new QPushButton(obs_module_text("StopScan"), &dlg);
+	stopBtn->setEnabled(false);
 	hostRow->addWidget(hostEdit, 1);
 	hostRow->addWidget(probeBtn);
 	hostRow->addWidget(scanBtn);
 	hostRow->addWidget(ndiBtn);
+	hostRow->addWidget(stopBtn);
 	dv->addLayout(hostRow);
 	auto *results = new QListWidget(&dlg);
 	results->setMinimumHeight(120);
@@ -536,10 +539,15 @@ void PtzControlsDock::addCameraDialog()
 		probeBtn->setEnabled(!busy);
 		scanBtn->setEnabled(!busy);
 		ndiBtn->setEnabled(!busy);
+		stopBtn->setEnabled(busy);
 		status->setText(msg);
 		if (!busy)
 			pbar->setVisible(false);
 	};
+	connect(stopBtn, &QPushButton::clicked, &dlg, [&]() {
+		prober->stop();
+		setBusy(false, obs_module_text("ScanStopped"));
+	});
 	/* Sweep progress: a filling bar while probes are sent, then an
 	 * indeterminate bar while we listen for replies. */
 	connect(prober, &PtzProber::progress, &dlg, [=](int done, int total) {
