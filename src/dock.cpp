@@ -28,6 +28,7 @@
 #include <QGroupBox>
 #include <QMenu>
 #include <QInputDialog>
+#include <QCheckBox>
 #include <QNetworkInterface>
 #include <QHostAddress>
 #include <functional>
@@ -208,6 +209,9 @@ PtzControlsDock::PtzControlsDock(QWidget *parent) : QFrame(parent)
 			d->setExposureMode(m);
 	});
 	img->addRow(obs_module_text("Exposure"), expCombo_);
+	ccuSummary_ = new QLabel(imagePanel_);
+	ccuSummary_->setStyleSheet("color:#bbb;");
+	img->addRow(obs_module_text("Values"), ccuSummary_);
 	auto *moreBtn = new QPushButton(obs_module_text("MoreControls"), imagePanel_);
 	moreBtn->setFocusPolicy(Qt::NoFocus);
 	connect(moreBtn, &QPushButton::clicked, this, &PtzControlsDock::openCcuWindow);
@@ -286,6 +290,26 @@ void PtzControlsDock::refreshCameras()
 	imageToggle_->setVisible(img);
 	imageToggle_->setText((imageCollapsed_ ? "▶ " : "▼ ") + QString(obs_module_text("Image")));
 	imagePanel_->setVisible(img && !imageCollapsed_);
+
+	/* Track the current device's image-state readback for the inline display. */
+	disconnect(imageConn_);
+	ccuSummary_->setText("—");
+	if (d && d->hasImageControls()) {
+		imageConn_ = connect(d, &PTZDevice::imageState, this, &PtzControlsDock::updateImageInline);
+		if (!imageCollapsed_)
+			d->requestImageState();
+	}
+}
+
+void PtzControlsDock::updateImageInline(const ImageState &st)
+{
+	if (st.wbMode >= 0 && st.wbMode < wbCombo_->count())
+		wbCombo_->setCurrentIndex(st.wbMode);
+	if (st.exposureMode >= 0 && st.exposureMode < expCombo_->count())
+		expCombo_->setCurrentIndex(st.exposureMode);
+	auto vs = [](int v) { return v >= 0 ? QString::number(v) : QStringLiteral("—"); };
+	ccuSummary_->setText(QString("R %1  B %2   Sh %3  Ir %4  Gn %5")
+				     .arg(vs(st.redGain), vs(st.blueGain), vs(st.shutter), vs(st.iris), vs(st.gain)));
 }
 
 void PtzControlsDock::toggleImage()
@@ -293,6 +317,10 @@ void PtzControlsDock::toggleImage()
 	imageCollapsed_ = !imageCollapsed_;
 	imageToggle_->setText((imageCollapsed_ ? "▶ " : "▼ ") + QString(obs_module_text("Image")));
 	imagePanel_->setVisible(!imageCollapsed_);
+	if (!imageCollapsed_) {
+		if (auto *d = current())
+			d->requestImageState(); /* refresh values when opened */
+	}
 }
 
 void PtzControlsDock::buildPresetBank(int count)
@@ -403,9 +431,11 @@ void PtzControlsDock::onSettings()
 
 	auto *btns = new QHBoxLayout();
 	auto *addB = new QPushButton(obs_module_text("AddCamera"), &dlg);
+	auto *editB = new QPushButton(obs_module_text("EditCamera"), &dlg);
 	auto *renB = new QPushButton(obs_module_text("Rename"), &dlg);
 	auto *delB = new QPushButton(obs_module_text("Remove"), &dlg);
 	btns->addWidget(addB);
+	btns->addWidget(editB);
 	btns->addWidget(renB);
 	btns->addWidget(delB);
 	btns->addStretch();
@@ -419,6 +449,13 @@ void PtzControlsDock::onSettings()
 	connect(addB, &QPushButton::clicked, &dlg, [&]() {
 		addCameraDialog();
 		rebuild();
+	});
+	connect(editB, &QPushButton::clicked, &dlg, [&]() {
+		int id = selId();
+		if (id > 0) {
+			editCameraDialog(id);
+			rebuild();
+		}
 	});
 	connect(renB, &QPushButton::clicked, &dlg, [&]() {
 		int id = selId();
@@ -568,6 +605,78 @@ void PtzControlsDock::addCameraDialog()
 		return;
 	if (PTZDevice *d = PtzManager::instance().addDevice(cfg))
 		PtzManager::instance().setCurrent(d->id());
+}
+
+/* ---- Edit camera ---- */
+
+static QComboBox *transportCombo(QWidget *parent, ViscaTransport sel)
+{
+	auto *c = new QComboBox(parent);
+	c->addItem("Sony VISCA-over-IP (UDP :52381)", (int)ViscaTransport::SonyUDP);
+	c->addItem("Raw VISCA (UDP :1259)", (int)ViscaTransport::RawUDP);
+	c->addItem("Raw VISCA (TCP :5678)", (int)ViscaTransport::RawTCP);
+	c->setCurrentIndex(c->findData((int)sel));
+	return c;
+}
+
+void PtzControlsDock::editCameraDialog(int id)
+{
+	PTZDevice *d = PtzManager::instance().device(id);
+	if (!d)
+		return;
+	const PTZConfig c = d->config();
+
+	QDialog dlg(this);
+	dlg.setWindowTitle(obs_module_text("EditCamera"));
+	auto *form = new QFormLayout(&dlg);
+
+	auto *nameEdit = new QLineEdit(c.name, &dlg);
+	auto *protoCombo = new QComboBox(&dlg);
+	protoCombo->addItem("VISCA over IP", (int)PTZProtocol::ViscaIP);
+	protoCombo->addItem("NDI", (int)PTZProtocol::NDI);
+	protoCombo->setCurrentIndex(protoCombo->findData((int)c.protocol));
+	auto *hostEdit = new QLineEdit(c.host, &dlg);
+	auto *portSpin = new QSpinBox(&dlg);
+	portSpin->setRange(1, 65535);
+	portSpin->setValue(c.port > 0 ? c.port : 52381);
+	auto *trans = transportCombo(&dlg, c.transport);
+	auto *ccuEdit = new QLineEdit(c.ccu_host, &dlg);
+	auto *ccuTrans = transportCombo(&dlg, c.ccu_transport);
+	auto *panInv = new QCheckBox(obs_module_text("InvertPan"), &dlg);
+	panInv->setChecked(c.pan_invert);
+	auto *tiltInv = new QCheckBox(obs_module_text("InvertTilt"), &dlg);
+	tiltInv->setChecked(c.tilt_invert);
+
+	form->addRow(obs_module_text("Name"), nameEdit);
+	form->addRow(obs_module_text("Protocol"), protoCombo);
+	form->addRow(obs_module_text("Host"), hostEdit);
+	form->addRow(obs_module_text("Port"), portSpin);
+	form->addRow(obs_module_text("Transport"), trans);
+	form->addRow(obs_module_text("CcuHost"), ccuEdit);
+	form->addRow(obs_module_text("CcuTransport"), ccuTrans);
+	form->addRow(QString(), panInv);
+	form->addRow(QString(), tiltInv);
+
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+	connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+	form->addRow(buttons);
+
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+
+	PTZConfig nc = c; /* keep id + preset_names */
+	nc.name = nameEdit->text();
+	nc.protocol = (PTZProtocol)protoCombo->currentData().toInt();
+	nc.host = hostEdit->text().trimmed();
+	nc.port = portSpin->value();
+	nc.transport = (ViscaTransport)trans->currentData().toInt();
+	nc.ccu_host = ccuEdit->text().trimmed();
+	nc.ccu_transport = (ViscaTransport)ccuTrans->currentData().toInt();
+	nc.ccu_port = visca_default_port(nc.ccu_transport);
+	nc.pan_invert = panInv->isChecked();
+	nc.tilt_invert = tiltInv->isChecked();
+	PtzManager::instance().editDevice(id, nc);
 }
 
 /* ---- Full CCU window ---- */

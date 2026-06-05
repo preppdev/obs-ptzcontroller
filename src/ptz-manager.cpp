@@ -94,6 +94,28 @@ void PtzManager::renameDevice(int id, const QString &name)
 	}
 }
 
+void PtzManager::editDevice(int id, const PTZConfig &in)
+{
+	for (size_t i = 0; i < devices_.size(); i++) {
+		if (devices_[i]->id() != id)
+			continue;
+		PTZConfig cfg = in;
+		cfg.id = id;
+		if (cfg.preset_names.isEmpty()) /* preserve presets unless explicitly changed */
+			cfg.preset_names = devices_[i]->config().preset_names;
+		PTZDevice *nd = create(cfg);
+		if (!nd) /* keep the old device if the new config can't be created */
+			return;
+		devices_[i]->deleteLater();
+		devices_[i] = nd;
+		save();
+		emit devicesChanged();
+		if (current_ == id)
+			emit currentChanged(id);
+		return;
+	}
+}
+
 void PtzManager::setCurrent(int id)
 {
 	if (current_ == id)

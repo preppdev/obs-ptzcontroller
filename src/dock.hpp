@@ -19,6 +19,7 @@ class QWidget;
 class QPushButton;
 class QButtonGroup;
 class PTZDevice;
+struct ImageState;
 
 class PtzControlsDock : public QFrame {
 	Q_OBJECT
@@ -41,6 +42,8 @@ private:
 	void buildPresetBank(int count);
 	void presetContextMenu(int index, QWidget *anchor);
 	void addCameraDialog();
+	void editCameraDialog(int id);
+	void updateImageInline(const ImageState &st);
 
 	QWidget *camBar_;
 	QHBoxLayout *camLayout_;
@@ -55,5 +58,7 @@ private:
 	QWidget *imagePanel_;
 	class QComboBox *wbCombo_;
 	class QComboBox *expCombo_;
+	class QLabel *ccuSummary_;
+	QMetaObject::Connection imageConn_;
 	bool imageCollapsed_ = true;
 };

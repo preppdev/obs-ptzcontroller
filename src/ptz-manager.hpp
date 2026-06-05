@@ -24,6 +24,7 @@ public:
 	PTZDevice *addDevice(const PTZConfig &cfg); // creates, persists, returns it
 	void removeDevice(int id);
 	void renameDevice(int id, const QString &name);
+	void editDevice(int id, const PTZConfig &cfg); // recreate with new config (keeps id/presets)
 
 	void load();
 	void save();
