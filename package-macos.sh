@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 #
 # Build a DISTRIBUTABLE macOS package for PTZ Controller:
-#   - dist/ptz-controller-<ver>-macos-<arch>.pkg   (double-click installer,
-#     installs per-user to ~/Library/Application Support/obs-studio/plugins —
-#     no admin required)
+#   - dist/ptz-controller-<ver>-macos-<arch>.pkg   (per-user installer, no admin)
 #   - dist/ptz-controller-<ver>-macos-<arch>.zip   (drop-in .plugin bundle)
 #
-# This does NOT install into your own OBS (use pack-macos.sh for that). It only
-# produces artifacts under dist/.
-#
-# Signing: the .plugin is ad-hoc signed so it loads locally. For distribution to
-# OTHER machines without Gatekeeper warnings you must sign with a Developer ID
-# and notarize — see the notes at the bottom of this script.
+# Signing/notarization (to install on other Macs without Gatekeeper warnings):
+#   CODESIGN_IDENT="Developer ID Application: DCAP Inc. (7CSVH6559W)" \
+#   CODESIGN_IDENT_INSTALLER="Developer ID Installer: DCAP Inc. (7CSVH6559W)" \
+#   ./package-macos.sh
+#   xcrun notarytool submit dist/<pkg> --keychain-profile isocorder-notary --wait
+#   xcrun stapler staple dist/<pkg>   (and the .plugin, then re-zip)
 #
 set -euo pipefail
 
@@ -21,13 +19,14 @@ ROOT=$(cd "$HERE/.." && pwd)
 NAME=ptz-controller
 VERSION=0.1.0
 ARCH="${ARCH:-arm64}"
-BUNDLE_ID=com.exeldro.${NAME}
+BUNDLE_ID=com.dcap.${NAME}
 
 OBS_APP="${OBS_APP:-/Applications/OBS.app}"
 OBSF="$OBS_APP/Contents/Frameworks"
 OBS_SRC="${OBS_SRC:-$ROOT/obs-studio-src}"
-QT="${QT:-$ROOT/Qt/6.8.3/macos}"
+QT="${QT:-/Volumes/NVME/Claude/Qt/6.8.3/macos}"
 MOC="$QT/libexec/moc"
+NDI_INC="${NDI_INC:-/Library/NDI SDK for Apple/include}"
 
 GEN="$HERE/.gen"
 WORK="$HERE/build-macos"
@@ -48,30 +47,35 @@ cat > "$HERE/src/version.h" <<EOF
 #define PROJECT_VERSION_PATCH 0
 EOF
 
-cflags=(
-  -std=c++20 -fPIC -Wall -arch "$ARCH" -mmacosx-version-min=12.0
+QTFW=(QtCore QtGui QtWidgets QtNetwork)
+cflags=(-std=c++20 -fPIC -Wall -arch "$ARCH" -mmacosx-version-min=12.0
   -I"$GEN" -I"$OBS_SRC/libobs" -I"$OBS_SRC/frontend/api" -I"$HERE/src" -I/opt/homebrew/include
-  -I"$QT/lib/QtCore.framework/Headers" -I"$QT/lib/QtGui.framework/Headers"
-  -I"$QT/lib/QtWidgets.framework/Headers" -F"$QT/lib"
-)
+  -I"$NDI_INC" -F"$QT/lib")
+for fw in "${QTFW[@]}"; do cflags+=("-I$QT/lib/$fw.framework/Headers"); done
+
+MOC_HDRS=(ptz-device visca-ip ptz-probe ptz-manager ndi-device hybrid-device dock)
+SRCS=(plugin-main visca-ip ptz-probe ptz-manager ndi-runtime ndi-device hybrid-device dock)
 
 echo "==> moc + compile ($ARCH)"
-"$MOC" "$HERE/src/dock.hpp" -o "$WORK/moc_dock.cpp"
 objs=()
-for f in plugin-main ptz-controller recorder-api audio-recorder dock; do
+for h in "${MOC_HDRS[@]}"; do
+  "$MOC" "$HERE/src/$h.hpp" -o "$WORK/moc_$h.cpp"
+  clang++ "${cflags[@]}" -c "$WORK/moc_$h.cpp" -o "$WORK/moc_$h.o"
+  objs+=("$WORK/moc_$h.o")
+done
+for f in "${SRCS[@]}"; do
   clang++ "${cflags[@]}" -c "$HERE/src/$f.cpp" -o "$WORK/$f.o"
   objs+=("$WORK/$f.o")
 done
-clang++ "${cflags[@]}" -c "$WORK/moc_dock.cpp" -o "$WORK/moc_dock.o"
-objs+=("$WORK/moc_dock.o")
 
 echo "==> link"
+qtlibs=()
+for fw in "${QTFW[@]}"; do qtlibs+=("$QT/lib/$fw.framework/$fw"); done
 clang++ "${objs[@]}" -bundle -arch "$ARCH" -mmacosx-version-min=12.0 \
   -F"$OBSF" -framework libobs "$OBSF/obs-frontend-api.dylib" \
-  "$QT/lib/QtWidgets.framework/QtWidgets" "$QT/lib/QtGui.framework/QtGui" \
-  "$QT/lib/QtCore.framework/QtCore" -Wl,-rpath,"$OBSF" -o "$WORK/$NAME"
+  "${qtlibs[@]}" -Wl,-rpath,"$OBSF" -o "$WORK/$NAME"
 
-echo "==> assemble .plugin bundle"
+echo "==> assemble .plugin"
 BUNDLE="$WORK/$NAME.plugin"
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
@@ -95,13 +99,9 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-# Developer ID Application identity (set CODESIGN_IDENT to e.g.
-# "Developer ID Application: Your Name (TEAMID)" to sign for distribution).
 CODESIGN_IDENT="${CODESIGN_IDENT:--}"
-echo "==> codesign .plugin ($CODESIGN_IDENT)"
-# A real Developer ID identity needs hardened runtime (--options runtime) and a
-# secure timestamp for notarization; ad-hoc ("-") ignores those.
 TS_FLAG=(); [[ "$CODESIGN_IDENT" != "-" ]] && TS_FLAG=(--timestamp)
+echo "==> codesign .plugin ($CODESIGN_IDENT)"
 codesign --force --deep --options runtime "${TS_FLAG[@]}" --sign "$CODESIGN_IDENT" "$BUNDLE/Contents/MacOS/$NAME"
 codesign --force --deep --options runtime "${TS_FLAG[@]}" --sign "$CODESIGN_IDENT" "$BUNDLE"
 
@@ -110,13 +110,11 @@ ditto -c -k --keepParent "$BUNDLE" "$DIST/$NAME-$VERSION-macos-$ARCH.zip"
 
 echo "==> build .pkg (per-user install)"
 PKGROOT="$WORK/pkgroot"
-rm -rf "$PKGROOT"
-mkdir -p "$PKGROOT"
+rm -rf "$PKGROOT"; mkdir -p "$PKGROOT"
 cp -R "$BUNDLE" "$PKGROOT/"
 pkgbuild --root "$PKGROOT" \
   --install-location "Library/Application Support/obs-studio/plugins" \
-  --identifier "$BUNDLE_ID" --version "$VERSION" \
-  "$WORK/$NAME-component.pkg"
+  --identifier "$BUNDLE_ID" --version "$VERSION" "$WORK/$NAME-component.pkg"
 
 cat > "$WORK/distribution.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
@@ -131,8 +129,6 @@ cat > "$WORK/distribution.xml" <<EOF
 EOF
 
 PKG="$DIST/$NAME-$VERSION-macos-$ARCH.pkg"
-# Set CODESIGN_IDENT_INSTALLER to a "Developer ID Installer: ..." identity to
-# sign the installer; otherwise it's unsigned (fine for local use).
 if [[ -n "${CODESIGN_IDENT_INSTALLER:-}" ]]; then
   productbuild --distribution "$WORK/distribution.xml" --package-path "$WORK" \
     --sign "$CODESIGN_IDENT_INSTALLER" "$PKG"
@@ -142,14 +138,4 @@ fi
 rm -f "$WORK/$NAME-component.pkg" "$WORK/distribution.xml"
 
 echo
-echo "==> artifacts:"
-ls -la "$DIST"
-echo
-cat <<'NOTE'
-To distribute to OTHER Macs without Gatekeeper warnings, sign + notarize:
-  1. CODESIGN_IDENT="Developer ID Application: NAME (TEAMID)" \
-     CODESIGN_IDENT_INSTALLER="Developer ID Installer: NAME (TEAMID)" ./package-macos.sh
-  2. xcrun notarytool submit dist/ptz-controller-<ver>-macos-arm64.pkg \
-       --apple-id <you@apple> --team-id <TEAMID> --password <app-specific-pw> --wait
-  3. xcrun stapler staple dist/ptz-controller-<ver>-macos-arm64.pkg
-NOTE
+echo "==> artifacts:"; ls -la "$DIST"
