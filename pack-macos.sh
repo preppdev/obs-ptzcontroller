@@ -45,8 +45,8 @@ cflags=(-std=c++20 -fPIC -Wall -arch "$ARCH" -mmacosx-version-min=12.0
   -I"$NDI_INC" -F"$QT/lib")
 for fw in "${QTFW[@]}"; do cflags+=("-I$QT/lib/$fw.framework/Headers"); done
 
-MOC_HDRS=(ptz-device visca-ip ptz-probe ptz-manager ndi-device dock)
-SRCS=(plugin-main visca-ip ptz-probe ptz-manager ndi-runtime ndi-device dock)
+MOC_HDRS=(ptz-device visca-ip ptz-probe ptz-manager ndi-device hybrid-device dock)
+SRCS=(plugin-main visca-ip ptz-probe ptz-manager ndi-runtime ndi-device hybrid-device dock)
 
 echo "==> moc + compile ($ARCH)"
 objs=()

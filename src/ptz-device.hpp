@@ -99,6 +99,12 @@ struct PTZConfig {
 	bool pan_invert = false;
 	bool tilt_invert = false;
 	QMap<int, QString> preset_names; // index -> user label
+
+	/* Hybrid control: an NDI camera can route image/CCU commands over VISCA
+	 * (e.g. OBSBOT, whose NDI lacks CCU). Set ccu_host to enable. */
+	QString ccu_host;
+	int ccu_port = 0;
+	ViscaTransport ccu_transport = ViscaTransport::SonyUDP;
 };
 
 class PTZDevice : public QObject {

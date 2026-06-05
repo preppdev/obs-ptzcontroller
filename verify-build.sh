@@ -39,8 +39,8 @@ flags=(-std=c++20 -fPIC -Wall
 for fw in "${QTFW[@]}"; do flags+=("-I$QT/lib/$fw.framework/Headers"); done
 
 # Headers with Q_OBJECT need moc.
-MOC_HDRS=(ptz-device visca-ip ptz-probe ptz-manager ndi-device dock)
-SRCS=(plugin-main visca-ip ptz-probe ptz-manager ndi-runtime ndi-device dock)
+MOC_HDRS=(ptz-device visca-ip ptz-probe ptz-manager ndi-device hybrid-device dock)
+SRCS=(plugin-main visca-ip ptz-probe ptz-manager ndi-runtime ndi-device hybrid-device dock)
 
 echo "==> moc"
 mocs=()

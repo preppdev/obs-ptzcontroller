@@ -203,6 +203,11 @@ void NDIDevice::requestImageState()
 	s.exposureMode = expManual_ ? 1 : 0;
 	s.redGain = (int)(red_ * 255.0f);
 	s.blueGain = (int)(blue_ * 255.0f);
+	if (expManual_) { /* show as 0–100% (NDI uses 0..1, not a raw index) */
+		s.shutter = (int)(shutter_ * 100.0f);
+		s.iris = (int)(iris_ * 100.0f);
+		s.gain = (int)(gain_ * 100.0f);
+	}
 	emit imageState(s);
 }
 

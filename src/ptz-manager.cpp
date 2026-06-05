@@ -4,6 +4,7 @@
 #include "ptz-manager.hpp"
 #include "visca-ip.hpp"
 #include "ndi-device.hpp"
+#include "hybrid-device.hpp"
 
 #include <obs-module.h>
 #include <util/platform.h>
@@ -30,6 +31,14 @@ PTZDevice *PtzManager::create(const PTZConfig &cfg)
 	case PTZProtocol::ViscaIP:
 		return new ViscaIP(cfg);
 	case PTZProtocol::NDI: {
+		if (!cfg.ccu_host.isEmpty()) { /* hybrid: NDI motion + VISCA CCU */
+			auto *h = new HybridDevice(cfg);
+			if (!h->valid()) {
+				h->deleteLater();
+				return nullptr;
+			}
+			return h;
+		}
 		auto *d = new NDIDevice(cfg);
 		if (!d->valid()) {
 			d->deleteLater();
@@ -126,6 +135,9 @@ void PtzManager::save()
 		obs_data_set_int(o, "preset_max", c.preset_max);
 		obs_data_set_bool(o, "pan_invert", c.pan_invert);
 		obs_data_set_bool(o, "tilt_invert", c.tilt_invert);
+		obs_data_set_string(o, "ccu_host", c.ccu_host.toUtf8().constData());
+		obs_data_set_int(o, "ccu_port", c.ccu_port);
+		obs_data_set_string(o, "ccu_transport", visca_transport_id(c.ccu_transport));
 		obs_data_t *names = obs_data_create();
 		for (auto it = c.preset_names.constBegin(); it != c.preset_names.constEnd(); ++it)
 			obs_data_set_string(names, QString::number(it.key()).toUtf8().constData(),
@@ -180,6 +192,9 @@ void PtzManager::load()
 			c.preset_max = 16;
 		c.pan_invert = obs_data_get_bool(o, "pan_invert");
 		c.tilt_invert = obs_data_get_bool(o, "tilt_invert");
+		c.ccu_host = obs_data_get_string(o, "ccu_host");
+		c.ccu_port = (int)obs_data_get_int(o, "ccu_port");
+		c.ccu_transport = visca_transport_from_id(obs_data_get_string(o, "ccu_transport"));
 		obs_data_t *names = obs_data_get_obj(o, "preset_names");
 		if (names) {
 			for (obs_data_item_t *it = obs_data_first(names); it; obs_data_item_next(&it)) {

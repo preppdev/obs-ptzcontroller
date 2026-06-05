@@ -30,6 +30,8 @@ target_sources(${PROJECT_NAME} PRIVATE
   src/ndi-runtime.hpp
   src/ndi-device.cpp
   src/ndi-device.hpp
+  src/hybrid-device.cpp
+  src/hybrid-device.hpp
   src/dock.cpp
   src/dock.hpp)
 

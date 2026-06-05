@@ -525,9 +525,12 @@ void PtzControlsDock::addCameraDialog()
 	auto *portSpin = new QSpinBox(&dlg);
 	portSpin->setRange(1, 65535);
 	portSpin->setValue(52381);
+	auto *ccuEdit = new QLineEdit(&dlg);
+	ccuEdit->setPlaceholderText(obs_module_text("CcuHostHint"));
 	mf->addRow(obs_module_text("Name"), nameEdit);
 	mf->addRow(obs_module_text("Protocol"), protoCombo);
 	mf->addRow(obs_module_text("Port"), portSpin);
+	mf->addRow(obs_module_text("CcuHost"), ccuEdit);
 	lay->addWidget(manualBox);
 
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
@@ -553,6 +556,14 @@ void PtzControlsDock::addCameraDialog()
 		cfg.port = portSpin->value();
 		cfg.name = nameEdit->text().isEmpty() ? cfg.host : nameEdit->text();
 	}
+	/* Optional VISCA CCU host pairs with an NDI camera for hybrid control. */
+	const QString ccu = ccuEdit->text().trimmed();
+	if (!ccu.isEmpty()) {
+		cfg.ccu_host = ccu;
+		cfg.ccu_transport = ViscaTransport::SonyUDP; /* OBSBOT etc. use Sony VISCA-over-IP :52381 */
+		cfg.ccu_port = 52381;
+	}
+
 	if (cfg.host.isEmpty())
 		return;
 	if (PTZDevice *d = PtzManager::instance().addDevice(cfg))
@@ -561,25 +572,35 @@ void PtzControlsDock::addCameraDialog()
 
 /* ---- Full CCU window ---- */
 
-/* A label + [▼][⟳][▲] stepper row driving a step callback (-1 / 0 / +1). */
-static void addStepperRow(QFormLayout *form, const QString &label, std::function<void(int)> step)
+/* A label + [−][⟳][+] stepper row + a current-value readout. Returns the value
+ * label so readback can update it. Buttons use the compact stylesheet so their
+ * glyphs render (the native macOS bezel clips small labels). */
+static QLabel *addStepperRow(QFormLayout *form, const QString &label, std::function<void(int)> step)
 {
 	auto *row = new QHBoxLayout();
-	auto *down = new QPushButton("▼");
+	auto *down = new QPushButton("−");
 	auto *reset = new QPushButton("⟳");
-	auto *up = new QPushButton("▲");
+	auto *up = new QPushButton("+");
 	for (auto *b : {down, reset, up}) {
 		b->setFixedWidth(36);
 		b->setFocusPolicy(Qt::NoFocus);
+		b->setStyleSheet(kCellStyle);
 	}
 	QObject::connect(down, &QPushButton::clicked, down, [step]() { step(-1); });
 	QObject::connect(reset, &QPushButton::clicked, reset, [step]() { step(0); });
 	QObject::connect(up, &QPushButton::clicked, up, [step]() { step(1); });
+	auto *val = new QLabel("—");
+	val->setMinimumWidth(44);
+	val->setAlignment(Qt::AlignCenter);
+	val->setStyleSheet("color:#ddd; font-weight:bold;");
 	row->addWidget(down);
 	row->addWidget(reset);
 	row->addWidget(up);
+	row->addSpacing(10);
+	row->addWidget(val);
 	row->addStretch();
 	form->addRow(label, row);
+	return val;
 }
 
 void PtzControlsDock::openCcuWindow()
@@ -603,9 +624,13 @@ void PtzControlsDock::openCcuWindow()
 	auto *red = new QSlider(Qt::Horizontal, &dlg);
 	red->setRange(0, 255);
 	red->setValue(128);
+	auto *redVal = new QLabel("128", &dlg);
+	redVal->setMinimumWidth(36);
 	auto *blue = new QSlider(Qt::Horizontal, &dlg);
 	blue->setRange(0, 255);
 	blue->setValue(128);
+	auto *blueVal = new QLabel("128", &dlg);
+	blueVal->setMinimumWidth(36);
 	auto *trigger = new QPushButton(obs_module_text("OnePushTrigger"), &dlg);
 	auto syncWb = [=](int m) {
 		const bool manual = (m == 5);
@@ -618,10 +643,12 @@ void PtzControlsDock::openCcuWindow()
 		syncWb(m);
 	});
 	connect(red, &QSlider::valueChanged, &dlg, [=](int v) {
+		redVal->setText(QString::number(v));
 		if (auto *x = dev())
 			x->setRedGain(v);
 	});
 	connect(blue, &QSlider::valueChanged, &dlg, [=](int v) {
+		blueVal->setText(QString::number(v));
 		if (auto *x = dev())
 			x->setBlueGain(v);
 	});
@@ -632,8 +659,14 @@ void PtzControlsDock::openCcuWindow()
 	syncWb(0);
 	wf->addRow(obs_module_text("Mode"), wb);
 	wf->addRow(QString(), trigger);
-	wf->addRow(obs_module_text("RedGain"), red);
-	wf->addRow(obs_module_text("BlueGain"), blue);
+	auto *redRow = new QHBoxLayout();
+	redRow->addWidget(red, 1);
+	redRow->addWidget(redVal);
+	wf->addRow(obs_module_text("RedGain"), redRow);
+	auto *blueRow = new QHBoxLayout();
+	blueRow->addWidget(blue, 1);
+	blueRow->addWidget(blueVal);
+	wf->addRow(obs_module_text("BlueGain"), blueRow);
 	lay->addWidget(wbBox);
 
 	/* Exposure. */
@@ -647,9 +680,9 @@ void PtzControlsDock::openCcuWindow()
 			x->setExposureMode(m);
 	});
 	ef->addRow(obs_module_text("Mode"), ex);
-	addStepperRow(ef, obs_module_text("Shutter"), [dev](int s) { if (auto *x = dev()) x->stepShutter(s); });
-	addStepperRow(ef, obs_module_text("Iris"), [dev](int s) { if (auto *x = dev()) x->stepIris(s); });
-	addStepperRow(ef, obs_module_text("Gain"), [dev](int s) { if (auto *x = dev()) x->stepGain(s); });
+	QLabel *shLbl = addStepperRow(ef, obs_module_text("Shutter"), [dev](int s) { if (auto *x = dev()) x->stepShutter(s); });
+	QLabel *irLbl = addStepperRow(ef, obs_module_text("Iris"), [dev](int s) { if (auto *x = dev()) x->stepIris(s); });
+	QLabel *gnLbl = addStepperRow(ef, obs_module_text("Gain"), [dev](int s) { if (auto *x = dev()) x->stepGain(s); });
 	addStepperRow(ef, obs_module_text("Brightness"), [dev](int s) { if (auto *x = dev()) x->stepBright(s); });
 	lay->addWidget(exBox);
 
@@ -688,12 +721,17 @@ void PtzControlsDock::openCcuWindow()
 			red->blockSignals(true);
 			red->setValue(st.redGain);
 			red->blockSignals(false);
+			redVal->setText(QString::number(st.redGain));
 		}
 		if (st.blueGain >= 0) {
 			blue->blockSignals(true);
 			blue->setValue(st.blueGain);
 			blue->blockSignals(false);
+			blueVal->setText(QString::number(st.blueGain));
 		}
+		shLbl->setText(st.shutter >= 0 ? QString::number(st.shutter) : "—");
+		irLbl->setText(st.iris >= 0 ? QString::number(st.iris) : "—");
+		gnLbl->setText(st.gain >= 0 ? QString::number(st.gain) : "—");
 	});
 	d->requestImageState();
 
