@@ -46,6 +46,9 @@ public:
 signals:
 	void detected(ProbeResult result);
 	void finished();
+	/* Sweep progress: done hosts of total. done==total means all probes sent
+	 * and we're now in the reply-listen window. */
+	void progress(int done, int total);
 
 private slots:
 	void onReadyRead();

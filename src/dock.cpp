@@ -29,6 +29,8 @@
 #include <QMenu>
 #include <QInputDialog>
 #include <QCheckBox>
+#include <QProgressBar>
+#include <QCoreApplication>
 #include <QNetworkInterface>
 #include <QHostAddress>
 #include <functional>
@@ -520,6 +522,10 @@ void PtzControlsDock::addCameraDialog()
 	auto *results = new QListWidget(&dlg);
 	results->setMinimumHeight(120);
 	dv->addWidget(results);
+	auto *pbar = new QProgressBar(&dlg);
+	pbar->setTextVisible(true);
+	pbar->setVisible(false);
+	dv->addWidget(pbar);
 	auto *status = new QLabel(&dlg);
 	status->setStyleSheet("color:#888;");
 	dv->addWidget(status);
@@ -531,7 +537,23 @@ void PtzControlsDock::addCameraDialog()
 		scanBtn->setEnabled(!busy);
 		ndiBtn->setEnabled(!busy);
 		status->setText(msg);
+		if (!busy)
+			pbar->setVisible(false);
 	};
+	/* Sweep progress: a filling bar while probes are sent, then an
+	 * indeterminate bar while we listen for replies. */
+	connect(prober, &PtzProber::progress, &dlg, [=](int done, int total) {
+		pbar->setVisible(true);
+		if (done < total) {
+			pbar->setRange(0, total);
+			pbar->setValue(done);
+			pbar->setFormat(QString("%1 / %2 hosts").arg(done).arg(total));
+		} else {
+			pbar->setRange(0, 0); /* indeterminate */
+			pbar->setFormat(QString());
+			status->setText(obs_module_text("Listening"));
+		}
+	});
 	auto addResult = [results](const ProbeResult &r) {
 		auto *it = new QListWidgetItem(QString("%1  —  %2").arg(r.host, r.model));
 		it->setData(Qt::UserRole + 0, r.host);
@@ -548,16 +570,24 @@ void PtzControlsDock::addCameraDialog()
 	connect(probeBtn, &QPushButton::clicked, &dlg, [&]() {
 		results->clear();
 		setBusy(true, obs_module_text("Probing"));
+		pbar->setRange(0, 0); /* indeterminate */
+		pbar->setVisible(true);
 		prober->probeHost(hostEdit->text().trimmed());
 	});
 	connect(scanBtn, &QPushButton::clicked, &dlg, [&]() {
 		results->clear();
 		setBusy(true, obs_module_text("Scanning"));
+		pbar->setRange(0, 1);
+		pbar->setValue(0);
+		pbar->setVisible(true);
 		prober->scanSubnet(hostEdit->text().trimmed());
 	});
 	connect(ndiBtn, &QPushButton::clicked, &dlg, [&]() {
 		results->clear();
 		setBusy(true, obs_module_text("ScanningNDI"));
+		pbar->setRange(0, 0);
+		pbar->setVisible(true);
+		QCoreApplication::processEvents(); /* paint the busy state before the blocking discover */
 		const QVector<ProbeResult> found = ndi_discover();
 		for (const ProbeResult &r : found)
 			addResult(r);

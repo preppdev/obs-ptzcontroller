@@ -149,6 +149,7 @@ void PtzProber::sendBatch()
 		scanIdx_++;
 		sent++;
 	}
+	emit progress((int)scanIdx_, (int)scanCount_);
 	if (scanIdx_ >= scanCount_) {
 		batch_.stop();
 		timer_.start(2000); /* listen window after the last probe */
