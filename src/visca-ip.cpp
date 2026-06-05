@@ -146,3 +146,85 @@ void ViscaIP::home()
 {
 	sendVisca(QByteArray::fromHex("81010604ff"));
 }
+
+/* ---- Image / CCU controls ---- */
+
+void ViscaIP::setWhiteBalance(int mode)
+{
+	QByteArray cmd = QByteArray::fromHex("8101043500ff"); /* 35 0m */
+	cmd[4] = (char)(mode & 0x0f);
+	sendVisca(cmd);
+}
+
+void ViscaIP::whiteBalanceTrigger()
+{
+	sendVisca(QByteArray::fromHex("8101041005ff")); /* one-push WB trigger */
+}
+
+/* Direct value command: 81 01 04 <cmd> 00 00 0H 0L FF (value in low nibbles). */
+static QByteArray viscaDirect(uint8_t cmd, int value)
+{
+	QByteArray b = QByteArray::fromHex("8101040000000000ff");
+	b[3] = (char)cmd;
+	b[6] = (char)((value >> 4) & 0x0f);
+	b[7] = (char)(value & 0x0f);
+	return b;
+}
+
+void ViscaIP::setRedGain(int v)
+{
+	sendVisca(viscaDirect(0x43, v));
+}
+
+void ViscaIP::setBlueGain(int v)
+{
+	sendVisca(viscaDirect(0x44, v));
+}
+
+void ViscaIP::setExposureMode(int mode)
+{
+	/* 39 0m : Auto=0, Manual=3, Shutter-pri=0x0A, Iris-pri=0x0B, Bright=0x0D */
+	static const uint8_t m[] = {0x00, 0x03, 0x0a, 0x0b, 0x0d};
+	QByteArray cmd = QByteArray::fromHex("8101043900ff");
+	cmd[4] = (char)((mode >= 0 && mode < 5) ? m[mode] : 0x00);
+	sendVisca(cmd);
+}
+
+/* Up/Down/Reset stepping (camera clamps): 81 01 04 <cmd> 0X FF (02 up,03 down,00 reset). */
+static QByteArray viscaStep(uint8_t cmd, int dir)
+{
+	QByteArray b = QByteArray::fromHex("8101040000ff");
+	b[3] = (char)cmd;
+	b[4] = (char)(dir > 0 ? 0x02 : dir < 0 ? 0x03 : 0x00);
+	return b;
+}
+
+void ViscaIP::stepShutter(int dir)
+{
+	sendVisca(viscaStep(0x0a, dir));
+}
+
+void ViscaIP::stepIris(int dir)
+{
+	sendVisca(viscaStep(0x0b, dir));
+}
+
+void ViscaIP::stepGain(int dir)
+{
+	sendVisca(viscaStep(0x0c, dir));
+}
+
+void ViscaIP::stepBright(int dir)
+{
+	sendVisca(viscaStep(0x0d, dir));
+}
+
+void ViscaIP::setExposureComp(bool on)
+{
+	sendVisca(QByteArray::fromHex(on ? "8101043e02ff" : "8101043e03ff"));
+}
+
+void ViscaIP::setBacklight(bool on)
+{
+	sendVisca(QByteArray::fromHex(on ? "8101043302ff" : "8101043303ff"));
+}

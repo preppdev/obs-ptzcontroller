@@ -99,6 +99,102 @@ void NDIDevice::home()
 		ndi->recv_ptz_pan_tilt((NDIlib_recv_instance_t)recv_, 0.0f, 0.0f); /* absolute center */
 }
 
+/* ---- Image / CCU (NDI subset) ---- */
+
+void NDIDevice::applyManualWB()
+{
+	const NDIlib_v5 *ndi = ndi_lib();
+	if (ndi && recv_)
+		ndi->recv_ptz_white_balance_manual((NDIlib_recv_instance_t)recv_, red_, blue_);
+}
+
+void NDIDevice::applyManualExposure()
+{
+	const NDIlib_v5 *ndi = ndi_lib();
+	if (ndi && recv_)
+		ndi->recv_ptz_exposure_manual_v2((NDIlib_recv_instance_t)recv_, iris_, gain_, shutter_);
+}
+
+void NDIDevice::setWhiteBalance(int mode)
+{
+	const NDIlib_v5 *ndi = ndi_lib();
+	if (!ndi || !recv_)
+		return;
+	wbMode_ = mode;
+	auto r = (NDIlib_recv_instance_t)recv_;
+	switch (mode) {
+	case 1:
+		ndi->recv_ptz_white_balance_indoor(r);
+		break;
+	case 2:
+		ndi->recv_ptz_white_balance_outdoor(r);
+		break;
+	case 3:
+		ndi->recv_ptz_white_balance_oneshot(r);
+		break;
+	case 5:
+		applyManualWB();
+		break;
+	default:
+		ndi->recv_ptz_white_balance_auto(r);
+		break;
+	}
+}
+
+void NDIDevice::whiteBalanceTrigger()
+{
+	const NDIlib_v5 *ndi = ndi_lib();
+	if (ndi && recv_)
+		ndi->recv_ptz_white_balance_oneshot((NDIlib_recv_instance_t)recv_);
+}
+
+void NDIDevice::setRedGain(int v)
+{
+	red_ = std::clamp(v / 255.0f, 0.0f, 1.0f);
+	if (wbMode_ == 5)
+		applyManualWB();
+}
+
+void NDIDevice::setBlueGain(int v)
+{
+	blue_ = std::clamp(v / 255.0f, 0.0f, 1.0f);
+	if (wbMode_ == 5)
+		applyManualWB();
+}
+
+void NDIDevice::setExposureMode(int mode)
+{
+	const NDIlib_v5 *ndi = ndi_lib();
+	if (!ndi || !recv_)
+		return;
+	expManual_ = (mode != 0);
+	if (expManual_)
+		applyManualExposure(); /* NDI has no shutter/iris priority; treat as manual */
+	else
+		ndi->recv_ptz_exposure_auto((NDIlib_recv_instance_t)recv_);
+}
+
+void NDIDevice::stepShutter(int dir)
+{
+	shutter_ = std::clamp(shutter_ + dir * 0.05f, 0.0f, 1.0f);
+	expManual_ = true;
+	applyManualExposure();
+}
+
+void NDIDevice::stepIris(int dir)
+{
+	iris_ = std::clamp(iris_ + dir * 0.05f, 0.0f, 1.0f);
+	expManual_ = true;
+	applyManualExposure();
+}
+
+void NDIDevice::stepGain(int dir)
+{
+	gain_ = std::clamp(gain_ + dir * 0.05f, 0.0f, 1.0f);
+	expManual_ = true;
+	applyManualExposure();
+}
+
 QVector<ProbeResult> ndi_discover(int wait_ms)
 {
 	QVector<ProbeResult> out;

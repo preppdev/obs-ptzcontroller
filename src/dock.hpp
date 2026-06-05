@@ -31,6 +31,8 @@ private slots:
 	void onSettings();
 	void onPresetClicked(int index);
 	void togglePresets();
+	void toggleImage();
+	void openCcuWindow();
 
 private:
 	PTZDevice *current() const;
@@ -48,4 +50,10 @@ private:
 	QWidget *presetPanel_;
 	QGridLayout *presetGrid_;
 	bool presetsCollapsed_ = false;
+
+	QPushButton *imageToggle_;
+	QWidget *imagePanel_;
+	class QComboBox *wbCombo_;
+	class QComboBox *expCombo_;
+	bool imageCollapsed_ = true;
 };

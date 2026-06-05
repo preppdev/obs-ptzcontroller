@@ -27,8 +27,25 @@ public:
 	void presetSet(int index) override;
 	void home() override;
 
+	bool hasImageControls() const override { return true; }
+	void setWhiteBalance(int mode) override;
+	void whiteBalanceTrigger() override;
+	void setRedGain(int v) override;
+	void setBlueGain(int v) override;
+	void setExposureMode(int mode) override;
+	void stepShutter(int dir) override;
+	void stepIris(int dir) override;
+	void stepGain(int dir) override;
+
 private:
+	void applyManualWB();
+	void applyManualExposure();
+
 	void *recv_ = nullptr; // NDIlib_recv_instance_t
+	int wbMode_ = 0;
+	bool expManual_ = false;
+	float red_ = 0.5f, blue_ = 0.5f;
+	float iris_ = 0.5f, gain_ = 0.5f, shutter_ = 0.5f;
 };
 
 /* Discover NDI sources on the network (those that look like PTZ cameras).

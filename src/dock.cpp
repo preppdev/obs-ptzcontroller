@@ -181,6 +181,40 @@ PtzControlsDock::PtzControlsDock(QWidget *parent) : QFrame(parent)
 	presetGrid_->setSpacing(4);
 	root->addWidget(presetPanel_);
 
+	/* --- Image / CCU (accordion, collapsed by default) --- */
+	imageToggle_ = new QPushButton(content);
+	imageToggle_->setFlat(true);
+	imageToggle_->setStyleSheet("text-align:left; font-weight:bold; padding:4px;");
+	imageToggle_->setFocusPolicy(Qt::NoFocus);
+	connect(imageToggle_, &QPushButton::clicked, this, &PtzControlsDock::toggleImage);
+	root->addWidget(imageToggle_);
+
+	imagePanel_ = new QWidget(content);
+	auto *img = new QFormLayout(imagePanel_);
+	img->setContentsMargins(2, 2, 2, 2);
+	wbCombo_ = new QComboBox(imagePanel_);
+	wbCombo_->addItems({obs_module_text("WB.Auto"), obs_module_text("WB.Indoor"), obs_module_text("WB.Outdoor"),
+			    obs_module_text("WB.OnePush"), obs_module_text("WB.ATW"), obs_module_text("WB.Manual")});
+	connect(wbCombo_, QOverload<int>::of(&QComboBox::activated), this, [this](int m) {
+		if (auto *d = current())
+			d->setWhiteBalance(m);
+	});
+	img->addRow(obs_module_text("WhiteBalance"), wbCombo_);
+	expCombo_ = new QComboBox(imagePanel_);
+	expCombo_->addItems({obs_module_text("Exp.Auto"), obs_module_text("Exp.Manual"), obs_module_text("Exp.ShutterPri"),
+			     obs_module_text("Exp.IrisPri"), obs_module_text("Exp.Bright")});
+	connect(expCombo_, QOverload<int>::of(&QComboBox::activated), this, [this](int m) {
+		if (auto *d = current())
+			d->setExposureMode(m);
+	});
+	img->addRow(obs_module_text("Exposure"), expCombo_);
+	auto *moreBtn = new QPushButton(obs_module_text("MoreControls"), imagePanel_);
+	moreBtn->setFocusPolicy(Qt::NoFocus);
+	connect(moreBtn, &QPushButton::clicked, this, &PtzControlsDock::openCcuWindow);
+	img->addRow(QString(), moreBtn);
+	imagePanel_->setVisible(false);
+	root->addWidget(imagePanel_);
+
 	root->addStretch();
 
 	connect(&PtzManager::instance(), &PtzManager::devicesChanged, this, &PtzControlsDock::refreshCameras);
@@ -247,6 +281,18 @@ void PtzControlsDock::refreshCameras()
 	buildCameraBar();
 	auto *d = current();
 	buildPresetBank(d ? d->config().preset_max : 0);
+
+	const bool img = d && d->hasImageControls();
+	imageToggle_->setVisible(img);
+	imageToggle_->setText((imageCollapsed_ ? "▶ " : "▼ ") + QString(obs_module_text("Image")));
+	imagePanel_->setVisible(img && !imageCollapsed_);
+}
+
+void PtzControlsDock::toggleImage()
+{
+	imageCollapsed_ = !imageCollapsed_;
+	imageToggle_->setText((imageCollapsed_ ? "▶ " : "▼ ") + QString(obs_module_text("Image")));
+	imagePanel_->setVisible(!imageCollapsed_);
 }
 
 void PtzControlsDock::buildPresetBank(int count)
@@ -511,4 +557,123 @@ void PtzControlsDock::addCameraDialog()
 		return;
 	if (PTZDevice *d = PtzManager::instance().addDevice(cfg))
 		PtzManager::instance().setCurrent(d->id());
+}
+
+/* ---- Full CCU window ---- */
+
+/* A label + [▼][⟳][▲] stepper row driving a step callback (-1 / 0 / +1). */
+static void addStepperRow(QFormLayout *form, const QString &label, std::function<void(int)> step)
+{
+	auto *row = new QHBoxLayout();
+	auto *down = new QPushButton("▼");
+	auto *reset = new QPushButton("⟳");
+	auto *up = new QPushButton("▲");
+	for (auto *b : {down, reset, up}) {
+		b->setFixedWidth(36);
+		b->setFocusPolicy(Qt::NoFocus);
+	}
+	QObject::connect(down, &QPushButton::clicked, down, [step]() { step(-1); });
+	QObject::connect(reset, &QPushButton::clicked, reset, [step]() { step(0); });
+	QObject::connect(up, &QPushButton::clicked, up, [step]() { step(1); });
+	row->addWidget(down);
+	row->addWidget(reset);
+	row->addWidget(up);
+	row->addStretch();
+	form->addRow(label, row);
+}
+
+void PtzControlsDock::openCcuWindow()
+{
+	auto *d = current();
+	if (!d || !d->hasImageControls())
+		return;
+	const int devId = d->id();
+	auto dev = [devId]() { return PtzManager::instance().device(devId); }; // re-resolve each use
+
+	QDialog dlg(this);
+	dlg.setWindowTitle(obs_module_text("ImageSettings"));
+	auto *lay = new QVBoxLayout(&dlg);
+
+	/* White balance. */
+	auto *wbBox = new QGroupBox(obs_module_text("WhiteBalance"), &dlg);
+	auto *wf = new QFormLayout(wbBox);
+	auto *wb = new QComboBox(&dlg);
+	wb->addItems({obs_module_text("WB.Auto"), obs_module_text("WB.Indoor"), obs_module_text("WB.Outdoor"),
+		      obs_module_text("WB.OnePush"), obs_module_text("WB.ATW"), obs_module_text("WB.Manual")});
+	auto *red = new QSlider(Qt::Horizontal, &dlg);
+	red->setRange(0, 255);
+	red->setValue(128);
+	auto *blue = new QSlider(Qt::Horizontal, &dlg);
+	blue->setRange(0, 255);
+	blue->setValue(128);
+	auto *trigger = new QPushButton(obs_module_text("OnePushTrigger"), &dlg);
+	auto syncWb = [=](int m) {
+		const bool manual = (m == 5);
+		red->setEnabled(manual);
+		blue->setEnabled(manual);
+	};
+	connect(wb, QOverload<int>::of(&QComboBox::activated), &dlg, [=](int m) {
+		if (auto *x = dev())
+			x->setWhiteBalance(m);
+		syncWb(m);
+	});
+	connect(red, &QSlider::valueChanged, &dlg, [=](int v) {
+		if (auto *x = dev())
+			x->setRedGain(v);
+	});
+	connect(blue, &QSlider::valueChanged, &dlg, [=](int v) {
+		if (auto *x = dev())
+			x->setBlueGain(v);
+	});
+	connect(trigger, &QPushButton::clicked, &dlg, [=]() {
+		if (auto *x = dev())
+			x->whiteBalanceTrigger();
+	});
+	syncWb(0);
+	wf->addRow(obs_module_text("Mode"), wb);
+	wf->addRow(QString(), trigger);
+	wf->addRow(obs_module_text("RedGain"), red);
+	wf->addRow(obs_module_text("BlueGain"), blue);
+	lay->addWidget(wbBox);
+
+	/* Exposure. */
+	auto *exBox = new QGroupBox(obs_module_text("Exposure"), &dlg);
+	auto *ef = new QFormLayout(exBox);
+	auto *ex = new QComboBox(&dlg);
+	ex->addItems({obs_module_text("Exp.Auto"), obs_module_text("Exp.Manual"), obs_module_text("Exp.ShutterPri"),
+		      obs_module_text("Exp.IrisPri"), obs_module_text("Exp.Bright")});
+	connect(ex, QOverload<int>::of(&QComboBox::activated), &dlg, [=](int m) {
+		if (auto *x = dev())
+			x->setExposureMode(m);
+	});
+	ef->addRow(obs_module_text("Mode"), ex);
+	addStepperRow(ef, obs_module_text("Shutter"), [dev](int s) { if (auto *x = dev()) x->stepShutter(s); });
+	addStepperRow(ef, obs_module_text("Iris"), [dev](int s) { if (auto *x = dev()) x->stepIris(s); });
+	addStepperRow(ef, obs_module_text("Gain"), [dev](int s) { if (auto *x = dev()) x->stepGain(s); });
+	addStepperRow(ef, obs_module_text("Brightness"), [dev](int s) { if (auto *x = dev()) x->stepBright(s); });
+	lay->addWidget(exBox);
+
+	/* Toggles. */
+	auto *togRow = new QHBoxLayout();
+	auto *expc = new QPushButton(obs_module_text("ExposureComp"), &dlg);
+	expc->setCheckable(true);
+	auto *bl = new QPushButton(obs_module_text("Backlight"), &dlg);
+	bl->setCheckable(true);
+	connect(expc, &QPushButton::toggled, &dlg, [=](bool on) {
+		if (auto *x = dev())
+			x->setExposureComp(on);
+	});
+	connect(bl, &QPushButton::toggled, &dlg, [=](bool on) {
+		if (auto *x = dev())
+			x->setBacklight(on);
+	});
+	togRow->addWidget(expc);
+	togRow->addWidget(bl);
+	togRow->addStretch();
+	lay->addLayout(togRow);
+
+	auto *close = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+	connect(close, &QDialogButtonBox::rejected, &dlg, &QDialog::accept);
+	lay->addWidget(close);
+	dlg.exec();
 }

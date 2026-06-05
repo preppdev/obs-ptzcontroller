@@ -127,6 +127,22 @@ public:
 	virtual void presetClear(int index) { (void)index; } // optional
 	virtual void home() = 0;
 
+	/* ---- Image / CCU controls (optional; default no-ops) ---- */
+	virtual bool hasImageControls() const { return false; }
+	/* White balance: 0 Auto, 1 Indoor, 2 Outdoor, 3 One-Push, 4 Auto-Tracing, 5 Manual */
+	virtual void setWhiteBalance(int mode) { (void)mode; }
+	virtual void whiteBalanceTrigger() {}        // one-push trigger
+	virtual void setRedGain(int v0_255) { (void)v0_255; }
+	virtual void setBlueGain(int v0_255) { (void)v0_255; }
+	/* Exposure mode: 0 Auto, 1 Manual, 2 Shutter-pri, 3 Iris-pri, 4 Bright */
+	virtual void setExposureMode(int mode) { (void)mode; }
+	virtual void stepShutter(int dir) { (void)dir; } // -1 down, +1 up, 0 reset
+	virtual void stepIris(int dir) { (void)dir; }
+	virtual void stepGain(int dir) { (void)dir; }
+	virtual void stepBright(int dir) { (void)dir; }
+	virtual void setExposureComp(bool on) { (void)on; }
+	virtual void setBacklight(bool on) { (void)on; }
+
 protected:
 	PTZConfig cfg_;
 };

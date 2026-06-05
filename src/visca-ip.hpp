@@ -28,6 +28,19 @@ public:
 	void presetClear(int index) override;
 	void home() override;
 
+	bool hasImageControls() const override { return true; }
+	void setWhiteBalance(int mode) override;
+	void whiteBalanceTrigger() override;
+	void setRedGain(int v) override;
+	void setBlueGain(int v) override;
+	void setExposureMode(int mode) override;
+	void stepShutter(int dir) override;
+	void stepIris(int dir) override;
+	void stepGain(int dir) override;
+	void stepBright(int dir) override;
+	void setExposureComp(bool on) override;
+	void setBacklight(bool on) override;
+
 	int pan_speed_max = 0x18;
 	int tilt_speed_max = 0x14;
 	int zoom_speed_max = 7;
